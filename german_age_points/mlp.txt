@@ -1,2 +1,0 @@
-# acc, DP Gap, EO Gap, EOdds Gap
-0.7600 0.1181 0.1538 0.1157
