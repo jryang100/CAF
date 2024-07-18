@@ -1,0 +1,173 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+EPS = 1e-8
+has_sex_race = 1
+
+
+def bucket(x, buckets):
+    x = float(x)
+    n = len(buckets)
+    label = n
+    for i in range(len(buckets)):
+        if x <= buckets[i]:
+            label = i
+            break
+    template = [0. for j in range(n + 1)]
+    template[label] = 1.
+    return template
+
+
+def onehot(x, choices):
+    if not x in choices:
+        print('could not find "{}" in choices'.format(x))
+        print(choices)
+        raise Exception()
+    label = choices.index(x)
+    template = [0. for j in range(len(choices))]
+    template[label] = 1.
+    return template
+
+
+def continuous(x):
+    return [float(x)]
+
+
+def parse_row(row, headers, headers_use):
+    new_row_dict = {}
+    for i in range(len(row)):
+        x = row[i]
+        hdr = headers[i]
+        new_row_dict[hdr] = fns[hdr](x)
+    sens_att_sex = new_row_dict[sensitive[0]]
+    sens_att_race = new_row_dict[sensitive[1]]
+    label = new_row_dict[target]
+    new_row = []
+    for h in headers_use:
+        new_row = new_row + new_row_dict[h]
+    return new_row, label, sens_att_sex, sens_att_race
+
+
+def whiten(X, mn, std):
+    mntile = np.tile(mn, (X.shape[0], 1))
+    stdtile = np.maximum(np.tile(std, (X.shape[0], 1)), EPS)
+    X = X - mntile
+    X = np.divide(X, stdtile)
+    return X
+
+
+if __name__ == '__main__':
+    f_in_data = './datasets/adult_multiple.csv'
+    df = pd.read_csv(f_in_data)
+    adult_data = df.values
+    train_set, test_set = train_test_split(adult_data, test_size=0.2, random_state=42)
+    hd_file = 'datasets/adult_multiple.headers'
+    f_out_np = './datasets/adult_multiple.npz'
+    REMOVE_MISSING = True
+    MISSING_TOKEN = '?'
+    headers = 'age,workclass,fnlwgt,education,education-num,marital-status,occupation,relationship,race,sex,capital-gain,capital-loss,hours-per-week,native-country,income'.split(
+        ',')
+    if has_sex_race:
+        headers_use = 'age,workclass,education,education-num,marital-status,occupation,relationship,race,sex,capital-gain,capital-loss,hours-per-week,native-country'.split(
+            ',')
+    else:
+        headers_use = 'age,workclass,education,education-num,marital-status,occupation,relationship,capital-gain,capital-loss,hours-per-week,native-country'.split(
+            ',')
+    target = 'income'
+    sensitive = ['sex', 'race']
+    options = {
+        'age': 'buckets',
+        'workclass': 'Private, Self-emp-not-inc, Self-emp-inc, Federal-gov, Local-gov, State-gov, Without-pay, Never-worked',
+        'fnlwgt': 'continuous',
+        'education': 'Bachelors, Some-college, 11th, HS-grad, Prof-school, Assoc-acdm, Assoc-voc, 9th, 7th-8th, 12th, Masters, 1st-4th, 10th, Doctorate, 5th-6th, Preschool',
+        'education-num': 'continuous',
+        'marital-status': 'Married-civ-spouse, Divorced, Never-married, Separated, Widowed, Married-spouse-absent, Married-AF-spouse',
+        'occupation': 'Tech-support, Craft-repair, Other-service, Sales, Exec-managerial, Prof-specialty, Handlers-cleaners, Machine-op-inspct, Adm-clerical, Farming-fishing, Transport-moving, Priv-house-serv, Protective-serv, Armed-Forces',
+        'relationship': 'Wife, Own-child, Husband, Not-in-family, Other-relative, Unmarried',
+        'race': 'White, no-White',
+        'sex': 'Female, Male',
+        'capital-gain': 'continuous',
+        'capital-loss': 'continuous',
+        'hours-per-week': 'continuous',
+        'native-country': 'United-States, Cambodia, England, Puerto-Rico, Canada, Germany, Outlying-US(Guam-USVI-etc), India, Japan, Greece, South, China, Cuba, Iran, Honduras, Philippines, Italy, Poland, Jamaica, Vietnam, Mexico, Portugal, Ireland, France, Dominican-Republic, Laos, Ecuador, Taiwan, Haiti, Columbia, Hungary, Guatemala, Nicaragua, Scotland, Thailand, Yugoslavia, El-Salvador, Trinadad&Tobago, Peru, Hong, Holand-Netherlands',
+        'income': ' <=50K,>50K'
+    }
+    buckets = {'age': [18, 25, 30, 35, 40, 45, 50, 55, 60, 65]}
+    options = {k: [s.strip() for s in sorted(options[k].split(','))] for k in options}
+    fns = {
+        'age': lambda x: bucket(x, buckets['age']),
+        'workclass': lambda x: onehot(x, options['workclass']),
+        'fnlwgt': lambda x: continuous(x),
+        'education': lambda x: onehot(x, options['education']),
+        'education-num': lambda x: continuous(x),
+        'marital-status': lambda x: onehot(x, options['marital-status']),
+        'occupation': lambda x: onehot(x, options['occupation']),
+        'relationship': lambda x: onehot(x, options['relationship']),
+        'race': lambda x: onehot(x, options['race']),
+        'sex': lambda x: onehot(x, options['sex']),
+        'capital-gain': lambda x: continuous(x),
+        'capital-loss': lambda x: continuous(x),
+        'hours-per-week': lambda x: continuous(x),
+        'native-country': lambda x: onehot(x, options['native-country']),
+        'income': lambda x: onehot(x.strip('.'), options['income']),
+    }
+    D = {}
+    for dataset, phase in [(train_set, 'training'), (test_set, 'test')]:
+        data = dataset
+        X = []
+        Y = []
+        A_race = []
+        A_sex = []
+        for r in data:
+            row = [s for s in r]
+            if MISSING_TOKEN in row and REMOVE_MISSING:
+                continue
+            if row in ([''], ['|1x3 Cross validator']):
+                continue
+            newrow, label, sens_att_sex, sens_att_race = parse_row(row, headers, headers_use)
+            X.append(newrow)
+            Y.append(label)
+            A_race.append(sens_att_race)
+            A_sex.append(sens_att_sex)
+        npX = np.array(X)
+        npY = np.array(Y)
+        npA_race = np.array(A_race)
+        npA_sex = np.array(A_sex)
+        D[phase] = {}
+        D[phase]['X'] = npX
+        D[phase]['Y'] = npY
+        D[phase]['A_race'] = npA_race
+        D[phase]['A_sex'] = npA_sex
+    mn = np.mean(D['training']['X'], axis=0)
+    std = np.std(D['training']['X'], axis=0)
+    D['training']['X'] = whiten(D['training']['X'], mn, std)
+    D['test']['X'] = whiten(D['test']['X'], mn, std)
+    f = open(hd_file, 'w')
+    i = 0
+    for h in headers_use:
+        if options[h] == 'continuous':
+            f.write('{:d},{}\n'.format(i, h))
+            i += 1
+        elif options[h][0] == 'buckets':
+            for b in buckets[h]:
+                colname = '{}_{:d}'.format(h, b)
+                f.write('{:d},{}\n'.format(i, colname))
+                i += 1
+        else:
+            for opt in options[h]:
+                colname = '{}_{}'.format(h, opt)
+                f.write('{:d},{}\n'.format(i, colname))
+                i += 1
+    n = D['training']['X'].shape[0]
+    shuf = np.random.permutation(n)
+    valid_pct = 0.2
+    valid_ct = int(n * valid_pct)
+    valid_inds = shuf[:valid_ct]
+    train_inds = shuf[valid_ct:]
+    np.savez(f_out_np, x_train=D['training']['X'], x_test=D['test']['X'],
+             y_train=D['training']['Y'], y_test=D['test']['Y'],
+             attr_sex_train=D['training']['A_sex'], attr_sex_test=D['test']['A_sex'],
+             attr_race_train=D['training']['A_race'], attr_race_test=D['test']['A_race'],
+             train_inds=train_inds, valid_inds=valid_inds)
+    print('process finished...')
